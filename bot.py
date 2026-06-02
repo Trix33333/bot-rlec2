@@ -2,7 +2,6 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from utils.database import init_db
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
