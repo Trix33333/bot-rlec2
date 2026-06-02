@@ -1,77 +1,50 @@
+import os
 import discord
 from discord.ext import commands
-import os
-import asyncio
-from utils.database import Database
+from dotenv import load_dotenv
+from utils.database import init_db
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ─── Configuration ────────────────────────────────────────────────────────────
-TOKEN = os.getenv("DISCORD_TOKEN", "VOTRE_TOKEN_ICI")
-PREFIX = "/"
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
 
-intents = discord.Intents.all()
+if not TOKEN:
+    print("❌ ERREUR FATALE : La variable d'environnement DISCORD_TOKEN est manquante !")
+    exit(1)
 
-bot = commands.Bot(
-    command_prefix=PREFIX,
-    intents=intents,
-    help_command=None,
-)
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
 
-bot.db = Database("data/rlec.db")
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-COGS = [
-    "cogs.welcome",
-    "cogs.tickets",
-    "cogs.teams",
-    "cogs.brackets",
-    "cogs.planning",
-    "cogs.stats",
-    "cogs.announcements",
-    "cogs.admin",
-    "cogs.help",
-]
+# On attache le scheduler au bot
+bot.scheduler = AsyncIOScheduler()
 
-# ─── Events ───────────────────────────────────────────────────────────────────
+async def setup():
+    """Charge la BDD et tous les cogs"""
+    await init_db()
+    bot.scheduler.start()
+    
+    for filename in os.listdir("./cogs"):
+        if filename.endswith(".py"):
+            try:
+                await bot.load_extension(f"cogs.{filename[:-3]}")
+                print(f"✅ Chargé : {filename}")
+            except Exception as e:
+                print(f"❌ Échec du chargement de {filename} : {e}")
+
 @bot.event
 async def on_ready():
-    await bot.db.init()
-    print(f"✅  RLEC Bot connecté en tant que {bot.user} ({bot.user.id})")
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="🏆 RLEC Championship"
-        )
-    )
-    try:
-        synced = await bot.sync_commands()
-        print(f"✅  {len(synced)} slash commands synchronisées")
-    except Exception as e:
-        print(f"❌  Erreur sync commands : {e}")
+    print(f"🚀 Connecté en tant que {bot.user.name} (ID: {bot.user.id})")
+    synced = await bot.tree.sync()
+    print(f"🔄 {len(synced)} commandes slash synchronisées.")
 
-@bot.event
-async def on_member_join(member: discord.Member):
-    welcome_cog = bot.cogs.get("Welcome")
-    if welcome_cog:
-        await welcome_cog.send_welcome(member)
-
-@bot.event
-async def on_application_command_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.respond("❌ Tu n'as pas les permissions nécessaires.", ephemeral=True)
-    elif isinstance(error, commands.MissingRole):
-        await ctx.respond("❌ Il te manque un rôle pour cette commande.", ephemeral=True)
-    else:
-        await ctx.respond(f"❌ Erreur : `{error}`", ephemeral=True)
-        raise error
-
-# ─── Load Cogs ────────────────────────────────────────────────────────────────
 async def main():
-    for cog in COGS:
-        try:
-            bot.load_extension(cog)
-            print(f"✅  Cog chargé : {cog}")
-        except Exception as e:
-            print(f"❌  Erreur chargement {cog} : {e}")
-    await bot.start(TOKEN)
+    async with bot:
+        await setup()
+        await bot.start(TOKEN)
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
